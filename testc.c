@@ -13,6 +13,7 @@ int main(void) {
     puts("starting client");
 
     sock = socket(AF_INET, SOCK_DGRAM, 0);
+    printf("testc sock: %d\n", sock);
 
     memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;

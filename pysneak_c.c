@@ -5,7 +5,7 @@
 
 #define PYCHECK(v)          \
     do {                    \
-        if (v == NULL) {    \
+        if ((v) == NULL) {  \
             PyErr_Print();  \
             exit(-1);       \
         }                   \
@@ -71,15 +71,6 @@ static socketpair_ft real_socketpair;
 static void pysneak_init(void) __attribute__ ((constructor));
 static void pysneak_fini(void) __attribute__ ((destructor));
 
-static PyObject *pModule;
-static PyObject *py_socket;
-
-void fix_python_path(void) {
-    PyRun_SimpleString("import sys");
-    PyRun_SimpleString("sys.path.append('.')");
-    return;
-}
-
 #define POPULATE_REAL_FUNC(func)                    \
     do {                                            \
         real_##func = dlsym((void *) -1l, #func);   \
@@ -110,48 +101,99 @@ void populate_real_funcs(void) {
     return;
 }
 
-void pysneak_init(void) {
-    PyObject *pName;
+static PyObject *py_module;
 
+void load_py_module(void) {
+    PyObject *module_name;
+    int ret;
+
+    ret = PyRun_SimpleString("import sys");
+    if (ret) {
+        fprintf(stderr, "Couldn't append to PYTHONPATH!\n");
+        exit(ret);
+    }
+
+    ret = PyRun_SimpleString("sys.path.append('.')");
+    if (ret) {
+        fprintf(stderr, "Couldn't append to PYTHONPATH!\n");
+        exit(ret);
+    }
+    
+    module_name = PyString_FromString("pysneak_py");
+    PYCHECK(module_name);
+    
+    py_module = PyImport_Import(module_name);
+    PYCHECK(py_module);
+    Py_DECREF(module_name);
+
+    return;
+}
+
+#define PYCHECK_FUNC(v)                                 \
+    do {                                                \
+        if ((v) == NULL || !PyCallable_Check((v))) {    \
+            PyErr_Print();                              \
+            exit(-1);                                   \
+        }                                               \
+    } while (0);
+
+
+#define POPULATE_PY_FUNC(func)                                      \
+    do {                                                            \
+        py_##func = PyObject_GetAttrString(py_module, "py_" #func); \
+        PYCHECK_FUNC(py_##func);                                    \
+    } while (0);
+
+static PyObject *py_socket;
+
+void populate_py_funcs(void) {
+    POPULATE_PY_FUNC(socket);
+    return;
+}
+
+void pysneak_init(void) {
     printf("pysneak init\n");
 
     populate_real_funcs();
 
     Py_Initialize();
     
-    fix_python_path();
+    load_py_module();
     
-    pName = PyString_FromString("pysneak_py");
-    PYCHECK(pName);
-    
-    pModule = PyImport_Import(pName);
-    PYCHECK(pModule);
-    Py_DECREF(pName);
-    
-    py_socket = PyObject_GetAttrString(pModule, "socket");
-    PYCHECK(py_socket);
-    
+    populate_py_funcs();
+
+    return;
+}
+
+#define CLEAR_PY_FUNC_REFS(func) Py_XDECREF(py_##func)
+
+void clear_py_funcs_refs(void) {
+    CLEAR_PY_FUNC_REFS(socket);
     return;
 }
 
 void pysneak_fini(void) {
-    Py_XDECREF(py_socket);
-    Py_DECREF(pModule);
+    clear_py_funcs_refs();
+    Py_DECREF(py_module);
     
     Py_Finalize();
     
     printf("pysneak fini\n");
 }
 
+static int in_python = 0;
 int socket(int domain, int type, int protocol) {
-    static socket_ft real_socket = NULL;
     PyObject *pArgs, *pValue;
     int fd;
 
-    if (real_socket == NULL) {
-        real_socket = dlsym((void *) -1l, "socket");
-        //real_socket = dlsym(RTLD_NEXT, "socket");
+    if (!in_python) {
+        printf("socket not in python\n");
+        return real_socket(domain, type, protocol);
     }
+
+    printf("socket in python\n");
+
+    in_python = 1;
 
     pArgs = PyTuple_New(3);
     PYCHECK(pArgs);
@@ -174,6 +216,9 @@ int socket(int domain, int type, int protocol) {
 
     fd = PyInt_AsLong(pValue);
     Py_DECREF(pValue);
+
+    in_python = 0;
+    printf("end socket in python\n");
 
     return fd;
 }
