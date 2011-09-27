@@ -1,0 +1,6 @@
+*.so
+*.o
+*.pyc
+tests
+testc
+test_dlsym_mucked
