@@ -1,0 +1,2 @@
+#!/bin/sh
+LD_LIBRARY_PATH=. LD_PRELOAD=./test_dlsym_mucker.so ./test_dlsym_mucked
